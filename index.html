@@ -44,7 +44,7 @@
         .stage-card { background: white; border-radius: 16px; padding: 15px; box-shadow: 0 4px 10px -2px rgba(0,0,0,0.05); border: 2px solid transparent; overflow: hidden; }
         .question-banner { background: var(--primary); color: white; padding: 12px 20px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-size: 1.1rem; line-height: 1.4; }
 
-        /* --- ROBUST GRID LAYOUT --- */
+        /* ROBUST GRID LAYOUT */
         .choices-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -54,9 +54,8 @@
 
         .choice-card {
             background: white; border-radius: 12px;
-            /* Flex ensures children fill the space */
             display: flex; flex-direction: column;
-            height: 200px; /* Fixed height is crucial for stability */
+            height: 200px; /* Fixed height for stability */
             position: relative;
             cursor: pointer;
             border: 3px solid white;
@@ -67,11 +66,7 @@
 
         .choice-card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px -3px rgba(0,0,0,0.15); border-color: #cbd5e1; }
         
-        .graph-target {
-            flex: 1; /* Takes up all remaining space */
-            width: 100%; 
-            min-height: 0; /* Prevents flex overflow issues */
-        }
+        .graph-target { flex: 1; width: 100%; min-height: 0; }
 
         #feedback {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.8);
@@ -130,6 +125,7 @@
     };
     let state = { score: 0, lives: 3, streak: 0, isSandbox: false, currentBaseFunc: "", correctFuncStr: "" };
 
+    // --- MATH & GENERATION ---
     function generatePoly() {
         const a = (Math.random() < 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 0.5); 
         const b = Math.floor(Math.random() * 5) - 2;
@@ -146,11 +142,24 @@
         return `${Math.floor(Math.random()*2)+1}*${type}(${freq}*x)`;
     }
     function getFreshFunction() { return Math.random() > 0.6 ? generateTrig() : generatePoly(); }
+    
     function evaluateSafe(fnStr, xVals) {
         try { const expr = math.compile(fnStr); return xVals.map(x => expr.evaluate({x})); } 
         catch(e) { return xVals.map(x=>0); }
     }
 
+    // Check if two functions produce nearly identical graphs
+    function areFunctionsTooSimilar(f1, f2) {
+        if(f1 === f2) return true;
+        // Test at 3 distinct points to see if values match
+        const testPoints = [-2, 0.5, 2];
+        const y1 = evaluateSafe(f1, testPoints);
+        const y2 = evaluateSafe(f2, testPoints);
+        // If all points are within 0.1 of each other, they are duplicate
+        return y1.every((val, i) => Math.abs(val - y2[i]) < 0.1);
+    }
+
+    // --- GAME LOGIC ---
     function startGame() {
         const f = getFreshFunction();
         const d1 = math.derivative(f, 'x').toString();
@@ -191,36 +200,60 @@
         const container = document.getElementById('choicesContainer');
         container.innerHTML = '';
         
-        // 1. Prepare Data
         let pool = [{ func: correctFunc, correct: true }];
-        pool.push({ func: `-1*(${correctFunc})`, correct: false });
-        if (mode === 'rev') pool.push({ func: math.derivative(d1, 'x').toString(), correct: false });
-        else pool.push({ func: math.derivative(d1, 'x').toString(), correct: false });
-        const r = getFreshFunction();
-        pool.push({ func: math.derivative(r, 'x').toString(), correct: false });
+        let attempts = 0;
 
-        pool = pool.sort(() => Math.random() - 0.5).slice(0, 4);
-        if (!pool.some(p => p.correct)) pool[0] = { func: correctFunc, correct: true };
+        // Loop until we have 4 UNIQUE choices
+        while(pool.length < 4 && attempts < 20) {
+            attempts++;
+            let candidateFunc = "";
+            
+            // Logic to pick a candidate type based on what we have
+            if(pool.length === 1) {
+                // Trap 1: Negative
+                candidateFunc = `-1*(${correctFunc})`;
+            } else if (pool.length === 2) {
+                // Trap 2: Derivative Trap
+                // If mode is reverse, trap is derivative of question (d2)
+                candidateFunc = (mode === 'rev') ? math.derivative(d1, 'x').toString() : math.derivative(d1, 'x').toString();
+            } else {
+                // Trap 3: Random
+                const r = getFreshFunction();
+                candidateFunc = math.derivative(r, 'x').toString();
+            }
+
+            // Uniqueness Check
+            let isDuplicate = false;
+            for(let existing of pool) {
+                if(areFunctionsTooSimilar(candidateFunc, existing.func)) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+
+            if(!isDuplicate) {
+                pool.push({ func: candidateFunc, correct: false });
+            }
+        }
+
+        // Shuffle
         pool = pool.sort(() => Math.random() - 0.5);
 
-        // 2. Build DOM Structure FIRST (Empty)
+        // Build DOM (Empty)
         const targets = [];
         pool.forEach((item, i) => {
             const div = document.createElement('div');
             div.className = 'choice-card';
             div.id = `choice-${i}`;
-            
             const gDiv = document.createElement('div');
             gDiv.className = 'graph-target';
             div.appendChild(gDiv);
             div.onclick = () => handleChoice(item, div);
             container.appendChild(div);
-            
             targets.push({ el: gDiv, item: item });
         });
 
-        // 3. Wait for Layout to Settle, THEN Plot
-        // This setTimeout is the key fix. It forces the DOM to calculate widths before Plotly draws.
+        // Plot with Delay for Layout Stability
         setTimeout(() => {
             targets.forEach(({ el, item }) => {
                 const y = evaluateSafe(item.func, CONFIG.xRange);
@@ -237,7 +270,7 @@
                     autosize: true
                 }, { staticPlot: true, responsive: true });
             });
-        }, 50); // 50ms delay to ensure container has width
+        }, 50);
     }
 
     function handleChoice(item, card) {
