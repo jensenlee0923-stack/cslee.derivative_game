@@ -67,7 +67,7 @@
             background: white; border-radius: 16px;
             padding: 15px; box-shadow: 0 4px 10px -2px rgba(0,0,0,0.05);
             border: 2px solid transparent;
-            overflow: hidden; /* Prevents graph spillover */
+            overflow: hidden;
         }
 
         .question-banner {
@@ -77,10 +77,10 @@
             font-size: 1.1rem; line-height: 1.4;
         }
 
-        /* --- ANSWER GRID (Optimized) --- */
+        /* --- ANSWER GRID (Fixed Layout) --- */
         .choices-container {
             display: grid;
-            /* Smart grid: fits as many 220px cards as possible, then stretches them */
+            /* Using auto-fill ensures items wrap correctly */
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); 
             gap: 20px;
             width: 100%;
@@ -90,19 +90,27 @@
             background: white; border-radius: 12px;
             padding: 0;
             cursor: pointer;
-            border: 3px solid white; /* Default border */
+            border: 3px solid white;
             transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
             box-shadow: 0 2px 5px -1px rgba(0,0,0,0.1);
-            overflow: hidden; /* Crucial for graph containment */
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-            height: 180px; /* Fixed height for consistency */
+            /* Fixed height ensures the graph has space to draw immediately */
+            height: 200px; 
+            position: relative;
         }
 
         .choice-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 10px 20px -3px rgba(0,0,0,0.15);
             border-color: #cbd5e1;
+        }
+        
+        .choice-graph-container {
+            width: 100%;
+            height: 100%;
+            flex-grow: 1;
         }
 
         /* --- Feedback & Sandbox --- */
@@ -168,7 +176,6 @@
 <script>
     // --- CONFIGURATION ---
     const CONFIG = {
-        // Reduced point count (0.2 step) for faster rendering on school laptops
         xRange: math.range(-4.5, 4.5, 0.2).toArray(),
         colors: { 
             blue: '#2563eb',   // f(x)
@@ -182,7 +189,6 @@
 
     // --- MATH ENGINE ---
     function generatePoly() {
-        // Coefficients tailored to fit well within -4 to 4 range
         const a = (Math.random() < 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 0.5); 
         const b = Math.floor(Math.random() * 5) - 2;
         const c = Math.floor(Math.random() * 5) - 2;
@@ -217,7 +223,6 @@
         const d1 = math.derivative(f, 'x').toString();
         const d2 = math.derivative(d1, 'x').toString();
 
-        // Three Modes: Standard (Deriv), Reverse (Integral), Concavity (2nd Deriv)
         const modes = ['std', 'rev', 'concave'];
         const mode = modes[Math.floor(Math.random() * modes.length)];
 
@@ -240,26 +245,26 @@
         }
 
         state.correctFuncStr = aFunc;
+        // Plot Main Graph
         plotMain(qFunc, qLabel, qColor);
+        // Generate Answers
         generateChoices(aFunc, f, d1, d2, mode);
     }
 
     function plotMain(funcStr, name, color) {
         const yVals = evaluateSafe(funcStr, CONFIG.xRange);
         
-        const layout = {
+        Plotly.newPlot('mainGraph', [{
+            x: CONFIG.xRange, y: yVals,
+            line: { color: color, width: 4 }, name: name
+        }], {
             margin: { t: 10, b: 20, l: 30, r: 10 },
             xaxis: { visible:true, fixedrange: true, zeroline: true, showgrid: true, zerolinecolor: '#334155', zerolinewidth: 2 },
             yaxis: { visible:true, fixedrange: true, zeroline: true, showgrid: true, zerolinecolor: '#334155', zerolinewidth: 2 },
             hovermode: 'x unified', 
             showlegend: true, 
             legend: { x: 0, y: 1 }
-        };
-
-        Plotly.newPlot('mainGraph', [{
-            x: CONFIG.xRange, y: yVals,
-            line: { color: color, width: 4 }, name: name
-        }], layout, { displayModeBar: false, responsive: true });
+        }, { displayModeBar: false, responsive: true });
     }
 
     function generateChoices(correctFunc, f, d1, d2, mode) {
@@ -267,16 +272,13 @@
         container.innerHTML = '';
         
         let pool = [{ func: correctFunc, correct: true }];
-        pool.push({ func: `-1*(${correctFunc})`, correct: false }); // Negative trap
-        
-        // Trap based on mode (e.g., if asking for Integral, show Derivative as a trap)
+        pool.push({ func: `-1*(${correctFunc})`, correct: false });
         if (mode === 'rev') pool.push({ func: math.derivative(d1, 'x').toString(), correct: false });
         else pool.push({ func: math.derivative(d1, 'x').toString(), correct: false });
         
         const r = getFreshFunction();
         pool.push({ func: math.derivative(r, 'x').toString(), correct: false });
 
-        // Shuffle and limit to 4
         pool = pool.sort(() => Math.random() - 0.5).slice(0, 4);
         if (!pool.some(p => p.correct)) pool[0] = { func: correctFunc, correct: true };
         pool = pool.sort(() => Math.random() - 0.5);
@@ -287,42 +289,42 @@
             div.id = `choice-${i}`;
             
             const gDiv = document.createElement('div');
-            gDiv.style.width = "100%"; 
-            gDiv.style.height = "100%"; 
-            gDiv.style.flexGrow = "1"; 
+            gDiv.className = 'choice-graph-container';
             div.appendChild(gDiv);
 
             const y = evaluateSafe(item.func, CONFIG.xRange);
-            
-            // Smart Zoom: Cap Y axis so curves are visible but not flat lines
             const maxY = Math.max(...y.map(Math.abs));
             const limit = maxY > 30 ? 30 : (maxY < 5 ? 5 : maxY + 1);
 
-            Plotly.newPlot(gDiv, [{
-                x: CONFIG.xRange, y: y,
-                // VISIBILITY: Thick black lines
-                line: { color: CONFIG.colors.black, width: 4 }, 
-            }], {
-                margin: { t: 5, b: 20, l: 25, r: 5 },
-                // VISIBILITY: Bold axes, faint grid
-                xaxis: { 
-                    visible: true, fixedrange: true, 
-                    showgrid: true, gridcolor: '#e2e8f0', 
-                    zeroline: true, zerolinecolor: '#000', zerolinewidth: 2, 
-                    showticklabels: true 
-                },
-                yaxis: { 
-                    visible: true, fixedrange: true, 
-                    showgrid: true, gridcolor: '#e2e8f0',
-                    zeroline: true, zerolinecolor: '#000', zerolinewidth: 2,
-                    showticklabels: false,
-                    range: [-limit, limit]
-                },
-                autosize: true
-            }, { staticPlot: true, responsive: true });
-
-            div.onclick = () => handleChoice(item, div);
+            // Append to DOM *BEFORE* plotting
             container.appendChild(div);
+
+            // FIX: Use requestAnimationFrame to let the browser calculate the div's size
+            // before we ask Plotly to draw into it. This fixes the resize issue.
+            requestAnimationFrame(() => {
+                Plotly.newPlot(gDiv, [{
+                    x: CONFIG.xRange, y: y,
+                    line: { color: CONFIG.colors.black, width: 4 }, 
+                }], {
+                    margin: { t: 5, b: 20, l: 25, r: 5 },
+                    xaxis: { 
+                        visible: true, fixedrange: true, 
+                        showgrid: true, gridcolor: '#e2e8f0', 
+                        zeroline: true, zerolinecolor: '#000', zerolinewidth: 2, 
+                        showticklabels: true 
+                    },
+                    yaxis: { 
+                        visible: true, fixedrange: true, 
+                        showgrid: true, gridcolor: '#e2e8f0',
+                        zeroline: true, zerolinecolor: '#000', zerolinewidth: 2,
+                        showticklabels: false,
+                        range: [-limit, limit]
+                    },
+                    autosize: true
+                }, { staticPlot: true, responsive: true });
+                
+                div.onclick = () => handleChoice(item, div);
+            });
         });
     }
 
