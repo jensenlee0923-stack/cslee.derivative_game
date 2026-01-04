@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculus Detective: Ultimate Edition</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --secondary: #10b981;
+            --danger: #ef4444;
+            --dark: #1e293b;
+            --light: #f8fafc;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--light);
+            color: var(--dark);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* --- Header & Controls --- */
+        .header-bar { text-align: center; margin-bottom: 20px; }
+        
+        .badge {
+            background: #e0e7ff; color: var(--primary);
+            padding: 4px 12px; border-radius: 12px;
+            font-size: 0.85rem; font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .controls {
+            display: flex; flex-wrap: wrap; gap: 15px;
+            margin-bottom: 20px; background: white;
+            padding: 8px 25px; border-radius: 50px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+            align-items: center; justify-content: center;
+        }
+
+        button {
+            padding: 8px 20px; border: none; border-radius: 25px;
+            cursor: pointer; font-weight: 700; font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-mode { background: var(--dark); color: white; }
+        .score-pill { font-weight: 700; font-size: 1rem; padding: 0 10px; }
+
+        /* --- Main Layout --- */
+        .game-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .stage-card {
+            background: white; border-radius: 16px;
+            padding: 15px; box-shadow: 0 4px 10px -2px rgba(0,0,0,0.05);
+            border: 2px solid transparent;
+            overflow: hidden; /* Prevents graph spillover */
+        }
+
+        .question-banner {
+            background: var(--primary); color: white;
+            padding: 12px 20px; border-radius: 8px;
+            margin-bottom: 15px; text-align: center;
+            font-size: 1.1rem; line-height: 1.4;
+        }
+
+        /* --- ANSWER GRID (Optimized) --- */
+        .choices-container {
+            display: grid;
+            /* Smart grid: fits as many 220px cards as possible, then stretches them */
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); 
+            gap: 20px;
+            width: 100%;
+        }
+
+        .choice-card {
+            background: white; border-radius: 12px;
+            padding: 0;
+            cursor: pointer;
+            border: 3px solid white; /* Default border */
+            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            box-shadow: 0 2px 5px -1px rgba(0,0,0,0.1);
+            overflow: hidden; /* Crucial for graph containment */
+            display: flex;
+            flex-direction: column;
+            height: 180px; /* Fixed height for consistency */
+        }
+
+        .choice-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px -3px rgba(0,0,0,0.15);
+            border-color: #cbd5e1;
+        }
+
+        /* --- Feedback & Sandbox --- */
+        #feedback {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) scale(0.8);
+            padding: 15px 30px; border-radius: 15px;
+            font-size: 2rem; font-weight: 800; color: white;
+            pointer-events: none; opacity: 0;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 1000; background: rgba(0,0,0,0.9);
+            backdrop-filter: blur(5px);
+        }
+        
+        .sandbox-toggles {
+            display: flex; gap: 15px; justify-content: center;
+            margin-bottom: 10px; flex-wrap: wrap; font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header-bar">
+    <h1>Calculus Detective <span class="badge">Ultimate</span></h1>
+    <p style="color: #64748b; font-size: 0.9rem;">Match Position, Slope, and Concavity</p>
+</div>
+
+<div class="controls">
+    <button class="btn-mode" onclick="toggleMode()">Switch to Sandbox</button>
+    <div id="gameStats" style="display:flex; gap:15px; align-items:center;">
+        <div class="score-pill" style="color:var(--primary)">Score: <span id="score">0</span></div>
+        <div class="score-pill" style="color:var(--danger)">Lives: <span id="lives">3</span></div>
+        <div class="score-pill" style="color:#64748b; font-size:0.9rem;">Streak: <span id="streak">0</span></div>
+    </div>
+</div>
+
+<div id="feedback"></div>
+
+<div id="gameUI" class="game-layout">
+    <div class="stage-card" style="border-top: 5px solid var(--primary);">
+        <div class="question-banner" id="questionText"></div>
+        <div id="mainGraph" style="width:100%; height:320px;"></div>
+    </div>
+
+    <div class="choices-container" id="choicesContainer">
+        </div>
+</div>
+
+<div id="sandboxUI" class="game-layout" style="display:none;">
+    <div class="stage-card">
+        <div class="sandbox-toggles">
+            <label style="color:#2563eb; font-weight:bold;"><input type="checkbox" id="checkF" checked onchange="updateSandbox()"> f(x)</label>
+            <label style="color:#d97706; font-weight:bold;"><input type="checkbox" id="checkF1" checked onchange="updateSandbox()"> f'(x)</label>
+            <label style="color:#10b981; font-weight:bold;"><input type="checkbox" id="checkF2" onchange="updateSandbox()"> f''(x)</label>
+        </div>
+        <div style="text-align:center; margin-bottom:10px;">
+            <button onclick="generateNewSandbox()" style="background:#e2e8f0; color:#1e293b; padding: 5px 15px; font-size:0.8rem;">New Random Function</button>
+        </div>
+        <div id="sandboxGraph" style="width:100%; height:450px;"></div>
+    </div>
+</div>
+
+<script>
+    // --- CONFIGURATION ---
+    const CONFIG = {
+        // Reduced point count (0.2 step) for faster rendering on school laptops
+        xRange: math.range(-4.5, 4.5, 0.2).toArray(),
+        colors: { 
+            blue: '#2563eb',   // f(x)
+            orange: '#d97706', // f'(x)
+            green: '#10b981',  // f''(x)
+            black: '#0f172a'   // High contrast option curves
+        }
+    };
+
+    let state = { score: 0, lives: 3, streak: 0, isSandbox: false, currentBaseFunc: "", correctFuncStr: "" };
+
+    // --- MATH ENGINE ---
+    function generatePoly() {
+        // Coefficients tailored to fit well within -4 to 4 range
+        const a = (Math.random() < 0.5 ? 1 : -1) * (Math.floor(Math.random() * 2) + 0.5); 
+        const b = Math.floor(Math.random() * 5) - 2;
+        const c = Math.floor(Math.random() * 5) - 2;
+        const p = Math.random() > 0.4 ? 3 : 4; 
+        
+        let terms = [`${a/4}*x^${p}`];
+        if(b !== 0) terms.push(`${b}*x^2`);
+        if(c !== 0) terms.push(`${c}*x`);
+        return terms.join(" + ");
+    }
+
+    function generateTrig() {
+        const type = Math.random() > 0.5 ? 'sin' : 'cos';
+        const freq = Math.random() > 0.5 ? 1 : 1.5;
+        return `${Math.floor(Math.random()*2)+1}*${type}(${freq}*x)`;
+    }
+
+    function getFreshFunction() {
+        return Math.random() > 0.6 ? generateTrig() : generatePoly();
+    }
+
+    function evaluateSafe(fnStr, xVals) {
+        try {
+            const expr = math.compile(fnStr);
+            return xVals.map(x => expr.evaluate({x}));
+        } catch(e) { return xVals.map(x=>0); }
+    }
+
+    // --- GAME LOGIC ---
+    function startGame() {
+        const f = getFreshFunction();
+        const d1 = math.derivative(f, 'x').toString();
+        const d2 = math.derivative(d1, 'x').toString();
+
+        // Three Modes: Standard (Deriv), Reverse (Integral), Concavity (2nd Deriv)
+        const modes = ['std', 'rev', 'concave'];
+        const mode = modes[Math.floor(Math.random() * modes.length)];
+
+        let qFunc, aFunc, qLabel, aLabel, qColor;
+
+        if (mode === 'std') {
+            qFunc = f; aFunc = d1;
+            qLabel = "f(x)"; aLabel = "f '(x)"; qColor = CONFIG.colors.blue;
+            document.getElementById('questionText').innerHTML = `Given function <b>${qLabel}</b> (Blue), find its derivative <b>${aLabel}</b>:`;
+        } 
+        else if (mode === 'rev') {
+            qFunc = d1; aFunc = f;
+            qLabel = "f '(x)"; aLabel = "f(x)"; qColor = CONFIG.colors.orange;
+            document.getElementById('questionText').innerHTML = `Given derivative <b>${qLabel}</b> (Orange), find original function <b>${aLabel}</b>:<br><small style="opacity:0.8">(Hint: Look for "Slope" → "Height")</small>`;
+        }
+        else { 
+            qFunc = f; aFunc = d2;
+            qLabel = "f(x)"; aLabel = "f ''(x)"; qColor = CONFIG.colors.blue;
+            document.getElementById('questionText').innerHTML = `Given <b>${qLabel}</b>, find the second derivative <b>${aLabel}</b> (Concavity):`;
+        }
+
+        state.correctFuncStr = aFunc;
+        plotMain(qFunc, qLabel, qColor);
+        generateChoices(aFunc, f, d1, d2, mode);
+    }
+
+    function plotMain(funcStr, name, color) {
+        const yVals = evaluateSafe(funcStr, CONFIG.xRange);
+        
+        const layout = {
+            margin: { t: 10, b: 20, l: 30, r: 10 },
+            xaxis: { visible:true, fixedrange: true, zeroline: true, showgrid: true, zerolinecolor: '#334155', zerolinewidth: 2 },
+            yaxis: { visible:true, fixedrange: true, zeroline: true, showgrid: true, zerolinecolor: '#334155', zerolinewidth: 2 },
+            hovermode: 'x unified', 
+            showlegend: true, 
+            legend: { x: 0, y: 1 }
+        };
+
+        Plotly.newPlot('mainGraph', [{
+            x: CONFIG.xRange, y: yVals,
+            line: { color: color, width: 4 }, name: name
+        }], layout, { displayModeBar: false, responsive: true });
+    }
+
+    function generateChoices(correctFunc, f, d1, d2, mode) {
+        const container = document.getElementById('choicesContainer');
+        container.innerHTML = '';
+        
+        let pool = [{ func: correctFunc, correct: true }];
+        pool.push({ func: `-1*(${correctFunc})`, correct: false }); // Negative trap
+        
+        // Trap based on mode (e.g., if asking for Integral, show Derivative as a trap)
+        if (mode === 'rev') pool.push({ func: math.derivative(d1, 'x').toString(), correct: false });
+        else pool.push({ func: math.derivative(d1, 'x').toString(), correct: false });
+        
+        const r = getFreshFunction();
+        pool.push({ func: math.derivative(r, 'x').toString(), correct: false });
+
+        // Shuffle and limit to 4
+        pool = pool.sort(() => Math.random() - 0.5).slice(0, 4);
+        if (!pool.some(p => p.correct)) pool[0] = { func: correctFunc, correct: true };
+        pool = pool.sort(() => Math.random() - 0.5);
+
+        pool.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'choice-card';
+            div.id = `choice-${i}`;
+            
+            const gDiv = document.createElement('div');
+            gDiv.style.width = "100%"; 
+            gDiv.style.height = "100%"; 
+            gDiv.style.flexGrow = "1"; 
+            div.appendChild(gDiv);
+
+            const y = evaluateSafe(item.func, CONFIG.xRange);
+            
+            // Smart Zoom: Cap Y axis so curves are visible but not flat lines
+            const maxY = Math.max(...y.map(Math.abs));
+            const limit = maxY > 30 ? 30 : (maxY < 5 ? 5 : maxY + 1);
+
+            Plotly.newPlot(gDiv, [{
+                x: CONFIG.xRange, y: y,
+                // VISIBILITY: Thick black lines
+                line: { color: CONFIG.colors.black, width: 4 }, 
+            }], {
+                margin: { t: 5, b: 20, l: 25, r: 5 },
+                // VISIBILITY: Bold axes, faint grid
+                xaxis: { 
+                    visible: true, fixedrange: true, 
+                    showgrid: true, gridcolor: '#e2e8f0', 
+                    zeroline: true, zerolinecolor: '#000', zerolinewidth: 2, 
+                    showticklabels: true 
+                },
+                yaxis: { 
+                    visible: true, fixedrange: true, 
+                    showgrid: true, gridcolor: '#e2e8f0',
+                    zeroline: true, zerolinecolor: '#000', zerolinewidth: 2,
+                    showticklabels: false,
+                    range: [-limit, limit]
+                },
+                autosize: true
+            }, { staticPlot: true, responsive: true });
+
+            div.onclick = () => handleChoice(item, div);
+            container.appendChild(div);
+        });
+    }
+
+    function handleChoice(item, card) {
+        if(card.classList.contains('disabled')) return;
+        const feedback = document.getElementById('feedback');
+        const allCards = document.querySelectorAll('.choice-card');
+
+        if (item.correct) {
+            state.score += (10 + state.streak * 2);
+            state.streak++;
+            updateStats();
+            card.style.background = "#dcfce7"; card.style.borderColor = "var(--secondary)";
+            feedback.innerText = "✓ Correct!"; feedback.style.background = "var(--secondary)";
+            feedback.style.opacity = 1; 
+            allCards.forEach(c => c.classList.add('disabled'));
+            setTimeout(() => { feedback.style.opacity = 0; startGame(); }, 1200);
+        } else {
+            state.lives--; state.streak = 0;
+            updateStats();
+            card.style.opacity = 0.5; card.style.borderColor = "var(--danger)";
+            card.classList.add('disabled');
+            feedback.innerText = "✗ Wrong!"; feedback.style.background = "var(--danger)";
+            feedback.style.opacity = 1;
+            setTimeout(() => { feedback.style.opacity = 0; }, 800);
+            if (state.lives <= 0) { alert(`Game Over! Score: ${state.score}`); resetGame(); }
+        }
+    }
+
+    function updateStats() {
+        document.getElementById('score').innerText = state.score;
+        document.getElementById('lives').innerText = state.lives;
+        document.getElementById('streak').innerText = state.streak;
+    }
+    function resetGame() { state.score = 0; state.lives = 3; state.streak = 0; updateStats(); startGame(); }
+
+    function toggleMode() {
+        state.isSandbox = !state.isSandbox;
+        const g = document.getElementById('gameUI');
+        const s = document.getElementById('sandboxUI');
+        if(state.isSandbox) {
+            g.style.display = 'none'; s.style.display = 'grid';
+            document.querySelector('.btn-mode').innerText = "Back to Game";
+            generateNewSandbox();
+        } else {
+            g.style.display = 'grid'; s.style.display = 'none';
+            document.querySelector('.btn-mode').innerText = "Switch to Sandbox";
+        }
+    }
+
+    function generateNewSandbox() { state.currentBaseFunc = getFreshFunction(); updateSandbox(); }
+    function updateSandbox() {
+        const traces = [];
+        const f = state.currentBaseFunc;
+        if(document.getElementById('checkF').checked) traces.push({x:CONFIG.xRange, y:evaluateSafe(f, CONFIG.xRange), name:'f(x)', line:{color:CONFIG.colors.blue, width:3}});
+        if(document.getElementById('checkF1').checked) traces.push({x:CONFIG.xRange, y:evaluateSafe(math.derivative(f, 'x').toString(), CONFIG.xRange), name:"f '(x)", line:{color:CONFIG.colors.orange, dash:'dash', width:2}});
+        if(document.getElementById('checkF2').checked) traces.push({x:CONFIG.xRange, y:evaluateSafe(math.derivative(math.derivative(f, 'x').toString(), 'x').toString(), CONFIG.xRange), name:"f ''(x)", line:{color:CONFIG.colors.green, dash:'dot', width:2}});
+        Plotly.newPlot('sandboxGraph', traces, { hovermode: 'x unified', xaxis: { zeroline: true }, yaxis: { zeroline: true } }, { responsive: true });
+    }
+
+    startGame();
+</script>
+</body>
+</html>
